@@ -158,3 +158,10 @@ backend/.env
 frontend/.env.local
 frontend/.env
 *.env
+
+# SQLite databases
+*.db
+*.sqlite
+*.sqlite3
+rate_limits.db
+

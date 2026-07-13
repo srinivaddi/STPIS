@@ -47,21 +47,35 @@ from app.services.backtester import StrategyBacktester
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """
-You are a highly analytical Financial Research AI. Your job is to perform a deep-dive technical, fundamental, and sentiment analysis on a stock ticker based on the raw financial metrics, price history, technical indicators, and news articles provided.
+class StockInsightAgent:
+    def _get_system_prompt(self) -> str:
+        """
+        Generates system prompt dynamically, enforcing short or verbose output based on VERBOSITY_LEVEL.
+        """
+        base_prompt = """You are a highly analytical Financial Research AI. Your job is to perform a deep-dive technical, fundamental, and sentiment analysis on a stock ticker based on the raw financial metrics, price history, technical indicators, and news articles provided.
 
 You must evaluate and return your analysis in strict JSON matching the required schema. Do not include any markdown formatting (like ```json), backticks, or prefix/suffix text. Output ONLY the raw JSON string.
+
+CRITICAL FORMATTING RULE: Never use double quotes (") inside JSON string values under any circumstances, as it corrupts the JSON decoder. Use single quotes (e.g. 'Apple') if you must write quotes. Never include raw newlines inside JSON string values.
 
 Analyze:
 1. Technical Momentum: Check the 14-day RSI (overbought >70, oversold <30, neutral otherwise) and price relative to 20-day SMA.
 2. Fundamental Health: Review valuation multiples (P/E ratio) and margins (profit, gross, operating margins) and Return on Equity (ROE).
 3. Sentiment Analysis: Synthesize current news articles and headlines into Bullish, Bearish, or Neutral aggregate sentiment.
 4. Key Risks: List 3 to 5 realistic, high-impact risks for the company based on the financials and recent news.
-5. Rating: Provide Buy, Hold, or Sell recommendation based on technicals, fundamentals, and risks.
-"""
+5. Rating: Provide Buy, Hold, or Sell recommendation based on technicals, fundamentals, and risks."""
 
-class StockInsightAgent:
+
+        verbosity = os.environ.get("VERBOSITY_LEVEL", "SHORT").upper().strip()
+        if verbosity == "VERBOSE":
+            constraint = "\n\nProvide comprehensive, detailed, and analytical paragraphs for all summary, thesis, and explanation fields. Do not shorten responses; offer deep-dive descriptions and thorough rationales."
+        else:
+            constraint = "\n\nCRITICAL: Keep your output text fields (such as summaries, explanations, thesis points, and rationales) extremely brief and concise. Limit each description to exactly 1 short sentence (maximum 15 words). Do not write paragraphs or multi-sentence analyses. This is required for real-time latency optimization."
+
+        return base_prompt + constraint
+
     def __init__(self):
+
         # Try to load .env manually
         try:
             for env_path in [".env", "backend/.env", "../.env"]:
@@ -93,12 +107,16 @@ class StockInsightAgent:
 
         # Configure Gemini API key from environment
         self.api_key = os.environ.get("GEMINI_API_KEY")
+        self.gemini_call_count = 0
         self.client_ready = False
-        # Allow model name override via env var; fallback to first supported model
-        self.model_name = os.getenv("INSIGHT_MODEL_NAME")
-        if self.api_key:
+        # Allow model name override via env var; default to fast gemini-2.5-flash
+        self.model_name = os.getenv("INSIGHT_MODEL_NAME") or "gemini-2.5-flash"
+
+        
+        active_key = self._get_active_gemini_api_key()
+        if active_key:
             try:
-                genai.configure(api_key=self.api_key)
+                genai.configure(api_key=active_key)
                 self.client_ready = True
                 logger.info("Gemini API key configured successfully.")
                 # Determine appropriate model name if not set
@@ -112,7 +130,52 @@ class StockInsightAgent:
         else:
             logger.warning("GEMINI_API_KEY environment variable not set. Running StockInsightAgent in MOCK mode.")
 
+    def _get_active_gemini_api_key(self) -> str:
+        primary_key = os.environ.get("GEMINI_API_KEY") or self.api_key
+        backup_key = os.environ.get("GEMINI_API_KEY_BACKUP")
+        # Alternating key rule: use backup key for every second call (odd call count index)
+        if backup_key and (self.gemini_call_count % 2 != 0):
+            logger.info(f"Alternating API key: using GEMINI_API_KEY_BACKUP for call index {self.gemini_call_count}.")
+            return backup_key
+        return primary_key
+
+    def _get_genai_client(self, api_key: str):
+        """
+        Caches and reuses Client instances to avoid connection renegotiation/cold-start latency on every query.
+        """
+        if not hasattr(self, "_clients_cache"):
+            self._clients_cache = {}
+        if api_key not in self._clients_cache:
+            from google.genai import Client
+            self._clients_cache[api_key] = Client(api_key=api_key)
+        return self._clients_cache[api_key]
+
+
+    def _clean_invalid_json_formatting(self, raw_str: str) -> str:
+        """
+        Walks through the raw LLM output and escapes raw newlines inside string values
+        (which causes json.loads to raise JSONDecodeError).
+        """
+        chars = list(raw_str)
+        in_quote = False
+        escape = False
+        for i in range(len(chars)):
+            c = chars[i]
+            if c == '\\' and not escape:
+                escape = True
+                continue
+            if c == '"' and not escape:
+                in_quote = not in_quote
+            if in_quote:
+                if c == '\n':
+                    chars[i] = '\\n'
+                elif c == '\r':
+                    chars[i] = ''
+            escape = False
+        return "".join(chars)
+
     def _select_supported_model(self) -> str:
+
         """Select a Gemini model that supports generateContent.
         Falls back to "gemini-1.5-flash" if discovery fails.
         """
@@ -126,7 +189,58 @@ class StockInsightAgent:
         # Fallback
         return "gemini-1.5-flash"
 
+
+    def _fetch_all_scrapers(self, ticker_symbol: str) -> dict:
+        """
+        Executes yfinance scraping tasks and simulation rules sequentially.
+        Sequential execution avoids SQLite caching database lock contention in yfinance.
+        """
+        from app.tools import (
+            get_insider_transactions,
+            get_institutional_holdings,
+            get_macro_indicators,
+            get_competitor_comparison,
+            get_options_chain_data,
+            get_earnings_intelligence,
+            get_early_warning_signals,
+            get_valuation_opportunities,
+            get_capital_allocation_data,
+            run_monte_carlo_dcf
+        )
+        import yfinance as yf
+
+        try:
+            ticker_obj = yf.Ticker(ticker_symbol)
+            sector_name = ticker_obj.info.get("sector", "Technology")
+        except Exception:
+            sector_name = "Technology"
+
+        insider_data = get_insider_transactions(ticker_symbol)
+        inst_data = get_institutional_holdings(ticker_symbol)
+        comp_data = get_competitor_comparison(ticker_symbol)
+        opt_data = get_options_chain_data(ticker_symbol)
+        earnings_intel = get_earnings_intelligence(ticker_symbol)
+        warning_data = get_early_warning_signals(ticker_symbol)
+        val_opp = get_valuation_opportunities(ticker_symbol)
+        dcf_sim = run_monte_carlo_dcf(ticker_symbol, num_simulations=100)
+        capital_alloc = get_capital_allocation_data(ticker_symbol)
+        macro_data = get_macro_indicators(sector_name)
+
+        return {
+            "insider_data": insider_data,
+            "inst_data": inst_data,
+            "comp_data": comp_data,
+            "opt_data": opt_data,
+            "earnings_intel": earnings_intel,
+            "warning_data": warning_data,
+            "val_opp": val_opp,
+            "dcf_sim": dcf_sim,
+            "capital_alloc": capital_alloc,
+            "macro_data": macro_data
+        }
+
     def _compute_technical_scales(self, prices: List[Dict[str, Any]], indicators: Dict[str, Any]) -> TechnicalScales:
+
         """Compute additional technical scale values.
         Returns a TechnicalScales pydantic instance.
         """
@@ -1242,6 +1356,7 @@ Analyze the following financial data for stock ticker: {stock_data.get('ticker')
             "model_name": "Rule-Based Mock Engine",
             "is_mock": True,
             "generated_at": time.time(),
+            "fallback_reason": None,
         }
 
         return mock_data
@@ -1890,6 +2005,8 @@ Analyze the following financial data for stock ticker: {stock_data.get('ticker')
             logger.error(f"Error calling local Ollama service: {e}", exc_info=True)
             logger.info("Falling back to composite rule-based mock analysis...")
             mock_data = self._get_mock_insight(ticker_symbol, stock_data, indicators)
+            mock_data["is_mock"] = True
+            mock_data["fallback_reason"] = f"Local Ollama Error: {type(e).__name__}"
             return StockInsightResponse(**mock_data)
 
     def _generate_insight_huggingface_hub(self, stock_data: StockDataResponse) -> StockInsightResponse:
@@ -2004,6 +2121,11 @@ Analyze the following financial data for stock ticker: {stock_data.get('ticker')
             logger.error(f"Error calling Hugging Face Hub: {e}", exc_info=True)
             logger.info("Falling back to rule-based mock analysis...")
             mock_data = self._get_mock_insight(ticker_symbol, stock_data, indicators)
+            mock_data["is_mock"] = True
+            if "429" in str(e) or "rate limit" in str(e).lower():
+                mock_data["fallback_reason"] = "External HUGGINGFACE API Rate Limit Exceeded (429)"
+            else:
+                mock_data["fallback_reason"] = f"External API Error: {type(e).__name__}"
             return StockInsightResponse(**mock_data)
 
         # Fallback to mock values for any missing schema fields
@@ -2182,27 +2304,23 @@ Analyze the following financial data for stock ticker: {stock_data.get('ticker')
         technical_scales = self._compute_technical_scales(prices_list, indicators)
         fundamental_comparisons = self._compute_fundamental_comparisons(data_dict.get('metrics', {}))
 
-        from app.tools import get_insider_transactions, get_institutional_holdings, get_macro_indicators, get_competitor_comparison, get_options_chain_data, get_earnings_intelligence, get_early_warning_signals, get_valuation_opportunities, get_capital_allocation_data, run_monte_carlo_dcf
-        insider_data = get_insider_transactions(ticker_symbol)
-        inst_data = get_institutional_holdings(ticker_symbol)
+        start_scrape = time.time()
+        scrapers = self._fetch_all_scrapers(ticker_symbol)
+        logger.info(f"Scrapers total fetch time: {time.time() - start_scrape:.2f} seconds")
+
+        insider_data = scrapers["insider_data"]
+        inst_data = scrapers["inst_data"]
         insider_txs = insider_data.get("transactions", [])
         inst_holders = inst_data.get("holders", [])
-        comp_data = get_competitor_comparison(ticker_symbol)
+        comp_data = scrapers["comp_data"]
         comp_list = comp_data.get("comparisons", [])
-        opt_data = get_options_chain_data(ticker_symbol)
-        earnings_intel = get_earnings_intelligence(ticker_symbol)
-        warning_data = get_early_warning_signals(ticker_symbol)
-        val_opp = get_valuation_opportunities(ticker_symbol)
-        dcf_sim = run_monte_carlo_dcf(ticker_symbol, num_simulations=100)
-        capital_alloc = get_capital_allocation_data(ticker_symbol)
-
-        import yfinance as yf
-        try:
-            ticker_obj = yf.Ticker(ticker_symbol)
-            sector_name = ticker_obj.info.get("sector", "Technology")
-        except:
-            sector_name = "Technology"
-        macro_data = get_macro_indicators(sector_name)
+        opt_data = scrapers["opt_data"]
+        earnings_intel = scrapers["earnings_intel"]
+        warning_data = scrapers["warning_data"]
+        val_opp = scrapers["val_opp"]
+        dcf_sim = scrapers["dcf_sim"]
+        capital_alloc = scrapers["capital_alloc"]
+        macro_data = scrapers["macro_data"]
         macro_list = macro_data.get("macro_indicators", [])
         sec_etf = macro_data.get("sector_etf", {
             "ticker": "XLK",
@@ -2212,6 +2330,7 @@ Analyze the following financial data for stock ticker: {stock_data.get('ticker')
             "six_month_return": 12.80
         })
 
+
         prompt = self._build_analysis_prompt(data_dict, indicators)
 
         result_dict = {}
@@ -2219,21 +2338,38 @@ Analyze the following financial data for stock ticker: {stock_data.get('ticker')
             from google.genai import Client
             from google.genai import types
 
-            client = Client(api_key=self.api_key)
-            model_id = self.model_name or "gemini-2.5-flash"
+            active_key = self._get_active_gemini_api_key()
+            os.environ["GEMINI_API_KEY"] = active_key
+            client = self._get_genai_client(active_key)
+
+            model_id = os.environ.get("INSIGHT_MODEL_NAME") or self.model_name or "gemini-2.5-flash"
+
             # Strip "models/" prefix if present to comply with the new SDK expectations
             if model_id.startswith("models/"):
                 model_id = model_id[7:]
                 
             logger.info(f"Invoking Google Gemini API ({model_id}) in BATCH mode using new SDK...")
 
+            start_api = time.time()
+            verbosity = os.environ.get("VERBOSITY_LEVEL", "SHORT").upper().strip()
+            max_tokens = 1800 if verbosity == "SHORT" else 4000
+
+            temp = 0.1 if verbosity == "SHORT" else 0.7
+            
             response = client.models.generate_content(
                 model=model_id,
-                contents=SYSTEM_PROMPT + "\n\n" + prompt,
+                contents=self._get_system_prompt() + "\n\n" + prompt,
                 config=types.GenerateContentConfig(
-                    response_mime_type="application/json"
+                    response_mime_type="application/json",
+                    max_output_tokens=max_tokens,
+                    temperature=temp
                 )
             )
+
+
+            logger.info(f"Gemini API roundtrip time: {time.time() - start_api:.2f} seconds")
+            self.gemini_call_count += 1
+
             generated_text = response.text.strip()
             if generated_text:
                 clean_text = generated_text
@@ -2247,7 +2383,11 @@ Analyze the following financial data for stock ticker: {stock_data.get('ticker')
                     clean_text = clean_text.strip()
 
                 try:
+                    from json_repair import repair_json
+                    clean_text = repair_json(clean_text)
                     result_dict = json.loads(clean_text)
+
+
                 except Exception as je:
                     logger.warning(f"Failed to parse JSON from Gemini output: {je}. Extracting raw text.")
                     import re
@@ -2258,10 +2398,27 @@ Analyze the following financial data for stock ticker: {stock_data.get('ticker')
                         raise je
             if "misinformation_analysis" in result_dict:
                 result_dict["misinformation"] = result_dict.pop("misinformation_analysis")
+            
+            # Sanitize key_risks list of dicts to list of strings
+            if "key_risks" in result_dict and isinstance(result_dict["key_risks"], list):
+                sanitized_risks = []
+                for item in result_dict["key_risks"]:
+                    if isinstance(item, dict):
+                        desc = item.get("description") or item.get("desc") or item.get("text") or list(item.values())[0]
+                        sanitized_risks.append(str(desc))
+                    else:
+                        sanitized_risks.append(str(item))
+                result_dict["key_risks"] = sanitized_risks
+
         except Exception as e:
             logger.error(f"Error calling Google Gemini API in batch: {e}", exc_info=True)
             logger.info("Falling back to rule-based mock analysis...")
             mock_data = self._get_mock_insight(ticker_symbol, stock_data, indicators)
+            mock_data["is_mock"] = True
+            if "429" in str(e) or "resource exhausted" in str(e).lower() or "rate limit" in str(e).lower():
+                mock_data["fallback_reason"] = "External GOOGLE API Rate Limit Exceeded (429)"
+            else:
+                mock_data["fallback_reason"] = f"External API Error: {type(e).__name__}"
             return StockInsightResponse(**mock_data)
 
         # Fallback to mock values for any missing schema fields
@@ -2437,12 +2594,17 @@ Analyze the following financial data for stock ticker: {stock_data.get('ticker')
         """
         Generates structured AI analysis using Gemini, Hugging Face Hub, or local Ollama.
         """
-        if self.use_local_llm:
+        # Reload env vars dynamically to support real-time toggling
+        use_batch_live = os.environ.get("BATCH", "false").lower() == "true"
+        provider_env = os.environ.get("LLM_PROVIDER", "GOOGLE").upper().strip()
+        
+        if provider_env == "LOCAL":
             return self._generate_insight_local_llm(stock_data)
-        elif not self.use_google_api:
+        elif provider_env != "GOOGLE":
             return self._generate_insight_huggingface_hub(stock_data)
-        elif self.use_batch:
+        elif use_batch_live:
             return self._generate_insight_gemini_batch(stock_data)
+
         ticker_symbol = stock_data.ticker.upper()
         
         # 1. Calculate technical indicators from prices
@@ -2463,39 +2625,20 @@ Analyze the following financial data for stock ticker: {stock_data.get('ticker')
         technical_scales = self._compute_technical_scales(prices_list, indicators)
         fundamental_comparisons = self._compute_fundamental_comparisons(data_dict.get('metrics', {}))
         
-        from app.tools import (
-            get_insider_transactions,
-            get_institutional_holdings,
-            get_macro_indicators,
-            get_competitor_comparison,
-            get_options_chain_data,
-            get_earnings_intelligence,
-            get_early_warning_signals,
-            get_valuation_opportunities,
-            get_capital_allocation_data,
-            run_monte_carlo_dcf,
-        )
-        insider_data = get_insider_transactions(ticker_symbol)
-        inst_data = get_institutional_holdings(ticker_symbol)
+        scrapers = self._fetch_all_scrapers(ticker_symbol)
+        insider_data = scrapers["insider_data"]
+        inst_data = scrapers["inst_data"]
         insider_txs = insider_data.get("transactions", [])
         inst_holders = inst_data.get("holders", [])
-        comp_data = get_competitor_comparison(ticker_symbol)
+        comp_data = scrapers["comp_data"]
         comp_list = comp_data.get("comparisons", [])
-        opt_data = get_options_chain_data(ticker_symbol)
-        earnings_intel = get_earnings_intelligence(ticker_symbol)
-        warning_data = get_early_warning_signals(ticker_symbol)
-        val_opp = get_valuation_opportunities(ticker_symbol)
-        dcf_sim = run_monte_carlo_dcf(ticker_symbol, num_simulations=100)
-        capital_alloc = get_capital_allocation_data(ticker_symbol)
-        
-        # Resolve sector name and fetch macro details
-        import yfinance as yf
-        try:
-            ticker_obj = yf.Ticker(ticker_symbol)
-            sector_name = ticker_obj.info.get("sector", "Technology")
-        except:
-            sector_name = "Technology"
-        macro_data = get_macro_indicators(sector_name)
+        opt_data = scrapers["opt_data"]
+        earnings_intel = scrapers["earnings_intel"]
+        warning_data = scrapers["warning_data"]
+        val_opp = scrapers["val_opp"]
+        dcf_sim = scrapers["dcf_sim"]
+        capital_alloc = scrapers["capital_alloc"]
+        macro_data = scrapers["macro_data"]
         macro_list = macro_data.get("macro_indicators", [])
         sec_etf = macro_data.get("sector_etf", {
             "ticker": "XLK",
@@ -2504,6 +2647,7 @@ Analyze the following financial data for stock ticker: {stock_data.get('ticker')
             "one_month_return": 3.45,
             "six_month_return": 12.80
         })
+
         
         prompt = self._build_analysis_prompt(data_dict, indicators)
         
@@ -2538,11 +2682,31 @@ Analyze the following financial data for stock ticker: {stock_data.get('ticker')
                 finally:
                     loop.close()
 
+            active_key = self._get_active_gemini_api_key()
+            os.environ["GEMINI_API_KEY"] = active_key
+            genai.configure(api_key=active_key)
             logger.info(f"Invoking Google ADK Orchestrator Agent for {ticker_symbol}...")
             response_text = run_adk_agent()
-            result_dict = json.loads(response_text)
+            self.gemini_call_count += 1
+
+            from json_repair import repair_json
+            repaired_response = repair_json(response_text)
+            result_dict = json.loads(repaired_response)
+
             if "misinformation_analysis" in result_dict:
                 result_dict["misinformation"] = result_dict.pop("misinformation_analysis")
+            
+            # Sanitize key_risks list of dicts to list of strings
+            if "key_risks" in result_dict and isinstance(result_dict["key_risks"], list):
+                sanitized_risks = []
+                for item in result_dict["key_risks"]:
+                    if isinstance(item, dict):
+                        desc = item.get("description") or item.get("desc") or item.get("text") or list(item.values())[0]
+                        sanitized_risks.append(str(desc))
+                    else:
+                        sanitized_risks.append(str(item))
+                result_dict["key_risks"] = sanitized_risks
+
             
             # Insert computed numeric fields (client side can also compute, but we include for completeness)
             result_dict["risk_metrics"] = risk_metrics.dict()
@@ -2713,4 +2877,9 @@ Analyze the following financial data for stock ticker: {stock_data.get('ticker')
             logger.error(f"Error generating insight from Google ADK for {ticker_symbol}: {e}", exc_info=True)
             logger.info("Falling back to mock insight...")
             mock_data = self._get_mock_insight(ticker_symbol, stock_data, indicators)
+            mock_data["is_mock"] = True
+            if "429" in str(e) or "resource exhausted" in str(e).lower() or "rate limit" in str(e).lower():
+                mock_data["fallback_reason"] = "External GOOGLE API Rate Limit Exceeded (429)"
+            else:
+                mock_data["fallback_reason"] = f"External API Error: {type(e).__name__}"
             return StockInsightResponse(**mock_data)

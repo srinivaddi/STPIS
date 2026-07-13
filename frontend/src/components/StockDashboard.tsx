@@ -470,6 +470,7 @@ interface StockInsightResponse {
   technical_scales: TechnicalScales;
   fundamental_comparisons: FundamentalComparisonItem[];
   executive_thesis?: string;
+    fallback_reason?: string;
 }
 
 interface HistogramBin {
@@ -4136,7 +4137,9 @@ export default function StockDashboard() {
       <div className="bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-900 rounded-2xl p-6 shadow-xl relative overflow-hidden">
         <div className="absolute top-0 right-0 px-4 py-1.5 rounded-bl-xl text-xs font-mono border-l border-b border-slate-900 flex items-center gap-1.5 bg-emerald-500/10 text-emerald-400">
           {insightData.is_mock ? (
-            <span className="text-amber-400 font-bold">⚠️ OFFLINE RULE FALLBACK</span>
+            <span className="text-amber-400 font-bold" title={insightData.fallback_reason || ""}>
+              ⚠️ OFFLINE RULE FALLBACK
+            </span>
           ) : (
             <span>AI ANALYSIS LOG</span>
           )}
@@ -4160,6 +4163,36 @@ export default function StockDashboard() {
         </div>
 
         <p className="text-sm text-slate-300 leading-relaxed w-full">{rec.summary}</p>
+
+        {/* CUSTOM ALERT WARNING BANNERS */}
+        {insightData.is_mock && (
+          <div className="mt-4">
+            {insightData.fallback_reason && (insightData.fallback_reason.startsWith("Rate Limited") || insightData.fallback_reason.includes("exceeded your limit")) ? (
+
+              <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 flex items-start space-x-3 text-amber-200">
+                <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0 text-amber-400" />
+                <div className="text-xs">
+                  <span className="font-bold text-amber-300">Rate Limited:</span> {insightData.fallback_reason} Presenting audited rule-based offline mock data.
+                </div>
+              </div>
+            ) : insightData.fallback_reason && (insightData.fallback_reason.includes("External") || (insightData.fallback_reason.includes("Rate Limit") && !insightData.fallback_reason.includes("for each user"))) ? (
+              <div className="bg-rose-500/10 border border-rose-500/20 rounded-xl p-4 flex items-start space-x-3 text-rose-200">
+                <AlertTriangle className="w-5 h-5 mt-0.5 flex-shrink-0 text-rose-400" />
+                <div className="text-xs">
+                  <span className="font-bold text-rose-300">External AI Service Busy:</span> The remote AI model is currently rate-limited (429). Presenting audited rule-based offline mock data.
+                </div>
+              </div>
+            ) : (
+              <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 flex items-start space-x-3 text-slate-300">
+                <Compass className="w-5 h-5 mt-0.5 flex-shrink-0 text-slate-400" />
+                <div className="text-xs">
+                  <span className="font-bold text-slate-200">Developer Demo Mode:</span> No remote AI credentials were provided. Running in offline rule-based sandbox.
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="text-[10px] text-slate-500 mt-4 border-t border-slate-800 pt-2 flex items-center gap-2 flex-wrap">
           <span>Model: {insightData.model_name}</span>
           <span>•</span>

@@ -308,6 +308,7 @@ class StockInsightResponse(BaseModel):
     model_name: str
     is_mock: bool
     generated_at: float
+    fallback_reason: Optional[str] = None
 
 class DebateParticipant(BaseModel):
     role: str

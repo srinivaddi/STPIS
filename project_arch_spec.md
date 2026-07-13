@@ -133,8 +133,11 @@ LLM_PROVIDER=GOOGLE
 
 # Google Gemini API Config
 GEMINI_API_KEY=your_gemini_api_key_here
-# Fallback to local default model if override is not provided
-# INSIGHT_MODEL_NAME=gemini-1.5-flash
+GEMINI_API_KEY_BACKUP=your_backup_gemini_api_key_here
+# Global model name configuration (defaults to gemini-2.5-flash)
+INSIGHT_MODEL_NAME=gemini-2.5-flash
+# Dynamic model response verbosity level: SHORT or VERBOSE
+VERBOSITY_LEVEL=SHORT
 
 # Hugging Face Configuration
 HF_TOKEN=your_hugging_face_token_here

@@ -17,6 +17,9 @@ except:
     pass
 
 use_parallel = os.environ.get("PARALLEL", "true").lower() == "true"
+DEFAULT_MODEL = os.environ.get("INSIGHT_MODEL_NAME", "gemini-2.5-flash")
+if DEFAULT_MODEL.startswith("models/"):
+    DEFAULT_MODEL = DEFAULT_MODEL[7:]
 from app.tools import (
     get_technical_metrics,
     get_fundamental_metrics,
@@ -42,7 +45,7 @@ from app.schemas.insight import StockInsightResponse
 
 technical_agent = Agent(
     name="technical_agent",
-    model="gemini-2.5-flash",
+    model=DEFAULT_MODEL,
     instruction="""
     You are an expert Technical Analyst.
     Use the `get_technical_metrics` tool to fetch live indicators for the stock.
@@ -56,7 +59,7 @@ technical_agent = Agent(
 
 fundamental_agent = Agent(
     name="fundamental_agent",
-    model="gemini-2.5-flash",
+    model=DEFAULT_MODEL,
     instruction="""
     You are a Fundamental Analyst.
     Use the `get_fundamental_metrics` tool to fetch financials.
@@ -70,7 +73,7 @@ fundamental_agent = Agent(
 
 sentiment_agent = Agent(
     name="sentiment_agent",
-    model="gemini-2.5-flash",
+    model=DEFAULT_MODEL,
     instruction="""
     You are a Sentiment Analyst.
     Use the `get_news_sentiment` tool to fetch articles.
@@ -83,7 +86,7 @@ sentiment_agent = Agent(
 
 risk_agent = Agent(
     name="risk_agent",
-    model="gemini-2.5-flash",
+    model=DEFAULT_MODEL,
     instruction="""
     You are a Risk Analyst.
     Use the `get_risk_metrics` tool to fetch statistical drawdowns and volatility.
@@ -95,7 +98,7 @@ risk_agent = Agent(
 
 insider_agent = Agent(
     name="insider_agent",
-    model="gemini-2.5-flash",
+    model=DEFAULT_MODEL,
     instruction="""
     You are an Insider & Institutional Flow Specialist.
     Use the `get_insider_transactions` and `get_institutional_holdings` tools to fetch SEC Form 4 and Form 13F details.
@@ -108,7 +111,7 @@ insider_agent = Agent(
 
 macro_agent = Agent(
     name="macro_agent",
-    model="gemini-2.5-flash",
+    model=DEFAULT_MODEL,
     instruction="""
     You are a Macroeconomic & Sector Trend Analyst.
     Use the `get_macro_indicators` tool to fetch Treasury yields, VIX volatility, and Sector ETF metrics (like XLK, XLF, XLE, etc.).
@@ -121,7 +124,7 @@ macro_agent = Agent(
 
 competitor_agent = Agent(
     name="competitor_agent",
-    model="gemini-2.5-flash",
+    model=DEFAULT_MODEL,
     instruction="""
     You are a Competitor Peer Benchmarking Specialist.
     Use the `get_competitor_comparison` tool to fetch side-by-side financial metrics for the target stock and its top competitors.
@@ -134,7 +137,7 @@ competitor_agent = Agent(
 
 options_agent = Agent(
     name="options_agent",
-    model="gemini-2.5-flash",
+    model=DEFAULT_MODEL,
     instruction="""
     You are an Options Flow & Derivatives Analyst.
     Use the `get_options_chain_data` tool to fetch Put/Call open interest ratios, volume ratios, and unusual option contract activities.
@@ -147,7 +150,7 @@ options_agent = Agent(
 
 earnings_intel_agent = Agent(
     name="earnings_intel_agent",
-    model="gemini-2.5-flash",
+    model=DEFAULT_MODEL,
     instruction="""
     You are an Earnings Intelligence Analyst.
     Use the `get_earnings_intelligence` tool to fetch historical earnings surprises and next expected calendar release forecast target points.
@@ -160,7 +163,7 @@ earnings_intel_agent = Agent(
 
 early_warning_agent = Agent(
     name="early_warning_agent",
-    model="gemini-2.5-flash",
+    model=DEFAULT_MODEL,
     instruction="""
     You are an Early Warning Analyst.
     Use the `get_early_warning_signals` tool to check for operational or credit warnings.
@@ -173,7 +176,7 @@ early_warning_agent = Agent(
 
 valuation_opp_agent = Agent(
     name="valuation_opp_agent",
-    model="gemini-2.5-flash",
+    model=DEFAULT_MODEL,
     instruction="""
     You are a Valuation Opportunity Analyst.
     Use the `get_valuation_opportunities` and `run_monte_carlo_dcf` tools to evaluate intrinsic pricing metrics and probabilistic DCF outcomes.
@@ -186,7 +189,7 @@ valuation_opp_agent = Agent(
 
 capital_allocation_agent = Agent(
     name="capital_allocation_agent",
-    model="gemini-2.5-flash",
+    model=DEFAULT_MODEL,
     instruction="""
     You are a Capital Allocation Analyst.
     Use the `get_capital_allocation_data` tool to evaluate management allocations.
@@ -199,7 +202,7 @@ capital_allocation_agent = Agent(
 
 corporate_moat_agent = Agent(
     name="corporate_moat_agent",
-    model="gemini-2.5-flash",
+    model=DEFAULT_MODEL,
     instruction="""
     You are a Corporate Moat & Pricing Power Analyst.
     Use the `get_fundamental_metrics` and `get_competitor_comparison` tools to analyze margins and ROIC/ROE relative to peers.
@@ -213,7 +216,7 @@ corporate_moat_agent = Agent(
 
 investment_committee_agent = Agent(
     name="investment_committee_agent",
-    model="gemini-2.5-flash",
+    model=DEFAULT_MODEL,
     instruction="""
     You are the coordinator for the Multi-Agent Investment Committee.
     Simulate a detailed debate between 8 investment personas regarding the stock:
@@ -234,7 +237,7 @@ investment_committee_agent = Agent(
 
 bull_bear_debate_agent = Agent(
     name="bull_bear_debate_agent",
-    model="gemini-2.5-flash",
+    model=DEFAULT_MODEL,
     instruction="""
     You are the coordinator for the Bull vs Bear Debate Platform.
     Simulate a structured debate between 3 roles regarding the stock:
@@ -256,7 +259,7 @@ bull_bear_debate_agent = Agent(
 
 fear_agent = Agent(
     name="fear_agent",
-    model="gemini-2.5-flash",
+    model=DEFAULT_MODEL,
     instruction="""
     You are a Fear & Capitulation Analyst.
     Use the `get_market_psychology_data` and `get_risk_metrics` tools to analyze panic vectors.
@@ -269,7 +272,7 @@ fear_agent = Agent(
 
 greed_agent = Agent(
     name="greed_agent",
-    model="gemini-2.5-flash",
+    model=DEFAULT_MODEL,
     instruction="""
     You are a Greed & Euphoria Analyst.
     Use the `get_market_psychology_data` and `get_technical_metrics` tools to analyze FOMO.
@@ -282,7 +285,7 @@ greed_agent = Agent(
 
 media_sentiment_agent = Agent(
     name="media_sentiment_agent",
-    model="gemini-2.5-flash",
+    model=DEFAULT_MODEL,
     instruction="""
     You are a Media Sentiment Analyst.
     Use the `get_market_psychology_data` and `get_news_sentiment` tools to evaluate news flow.
@@ -295,7 +298,7 @@ media_sentiment_agent = Agent(
 
 retail_sentiment_agent = Agent(
     name="retail_sentiment_agent",
-    model="gemini-2.5-flash",
+    model=DEFAULT_MODEL,
     instruction="""
     You are a Retail Investor Sentiment Analyst.
     Use the `get_market_psychology_data` tool to evaluate retail discussion buzz and herd behavior.
@@ -307,7 +310,7 @@ retail_sentiment_agent = Agent(
 
 institutional_sentiment_agent = Agent(
     name="institutional_sentiment_agent",
-    model="gemini-2.5-flash",
+    model=DEFAULT_MODEL,
     instruction="""
     You are an Institutional Sentiment & Positioning Analyst.
     Use the `get_market_psychology_data` and `get_options_chain_data` tools.
@@ -320,7 +323,7 @@ institutional_sentiment_agent = Agent(
 
 options_analyzer_agent = Agent(
     name="options_analyzer_agent",
-    model="gemini-2.5-flash",
+    model=DEFAULT_MODEL,
     instruction="""
     You are a Multi-Agent Options Strategy Analyzer.
     Simulate the deliberation of 5 sub-agents:
@@ -343,7 +346,7 @@ options_analyzer_agent = Agent(
 
 breakout_hunter_agent = Agent(
     name="breakout_hunter_agent",
-    model="gemini-2.5-flash",
+    model=DEFAULT_MODEL,
     instruction="""
     You are a Multi-Agent Technical Breakout Hunter.
     Simulate the deliberation of 5 sub-agents:
@@ -362,7 +365,7 @@ breakout_hunter_agent = Agent(
 
 alpha_discovery_agent = Agent(
     name="alpha_discovery_agent",
-    model="gemini-2.5-flash",
+    model=DEFAULT_MODEL,
     instruction="""
     You are the Alpha Discovery Engine.
     Simulate the independent signal generation of 6 sub-agents:
@@ -382,7 +385,7 @@ alpha_discovery_agent = Agent(
 
 misinformation_agent = Agent(
     name="misinformation_agent",
-    model="gemini-2.5-flash",
+    model=DEFAULT_MODEL,
     instruction="""
     You are the Misinformation Investigation Network coordinator.
     Simulate the independent investigation of 5 specialist sub-agents:
@@ -431,7 +434,7 @@ else:
 
 orchestrator_agent = Agent(
     name="orchestrator",
-    model="gemini-2.5-flash",
+    model=DEFAULT_MODEL,
     instruction="""
     You are the Chief Investment Officer.
     Your task is to compile the final Stock Research Report by aggregating the specialist analysis reports in your state:

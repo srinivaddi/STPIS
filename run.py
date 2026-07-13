@@ -65,14 +65,37 @@ def launch_servers():
         shell=True
     )
 
-    print("\n[STPIS] Both servers are running!")
-    print(" - Backend: http://localhost:8000")
-    print(" - Frontend: http://localhost:3000")
-    print("Press Ctrl+C to terminate both servers safely.\n")
+    # Wait for ports to be responsive before opening the browser
+    def wait_for_port(port: int, timeout: float = 60.0) -> bool:
+        import socket
+        start_time = time.time()
+        while True:
+            try:
+                with socket.create_connection(("127.0.0.1", port), timeout=1.0):
+                    return True
+            except (socket.timeout, ConnectionRefusedError):
+                if time.time() - start_time > timeout:
+                    return False
+                time.sleep(0.5)
+
+    print("\n[STPIS] Waiting for backend (8000) and frontend (3000) servers to boot...")
+    backend_ready = wait_for_port(8000)
+    frontend_ready = wait_for_port(3000)
+
+    if backend_ready and frontend_ready:
+        print("\n[STPIS] Both servers are running and fully responsive!")
+        print(" - Backend: http://localhost:8000")
+        print(" - Frontend: http://localhost:3000")
+        print("[STPIS] Launching web browser at http://localhost:3000/ ...\n")
+        import webbrowser
+        webbrowser.open("http://localhost:3000/")
+    else:
+        print("\n[STPIS] Warning: Timed out waiting for servers to become responsive.")
 
     # Keep script running to handle signals
     while True:
         time.sleep(1)
+
 
 if __name__ == "__main__":
     try:

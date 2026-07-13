@@ -54,20 +54,29 @@ Feature: Stock Trend Prediction and Insight System (STPIS) Specification
     Given a template configuration file exists at "backend/.env_sample"
     When the developer copies ".env_sample" to create a new "backend/.env" configuration file
     And configures the keys:
-      | Key               | Configured Value   |
-      | LLM_PROVIDER      | <provider>         |
-      | GEMINI_API_KEY    | <gemini_key>       |
-      | HF_TOKEN          | <hf_token>         |
-      | OLLAMA_MODEL      | <ollama_model>     |
+      | Key                    | Configured Value   |
+      | LLM_PROVIDER           | <provider>         |
+      | GEMINI_API_KEY         | <gemini_key>       |
+      | GEMINI_API_KEY_BACKUP  | <backup_key>       |
+      | HF_TOKEN               | <hf_token>         |
+      | OLLAMA_MODEL           | <ollama_model>     |
+      | VERBOSITY_LEVEL        | <verbosity>        |
     Then the "StockInsightAgent" constructor must load these variables into memory
     And route request triggers to the active client interface for "<provider>"
     But if no api credentials are found in the environment
     Then the agent must fallback to generating dynamic mock insights to allow local offline execution
     Examples:
-      | provider    | gemini_key | hf_token | ollama_model        |
-      | GOOGLE      | AQ_GEMINI  | None     | None                |
-      | HUGGINGFACE | None       | hf_token | None                |
-      | LOCAL       | None       | None     | mistral-nemo:latest |
+      | provider    | gemini_key | backup_key | hf_token | ollama_model        | verbosity |
+      | GOOGLE      | AQ_GEMINI  | AQ_BACKUP  | None     | None                | SHORT     |
+      | HUGGINGFACE | None       | None       | hf_token | None                | VERBOSE   |
+      | LOCAL       | None       | None       | None     | mistral-nemo:latest | SHORT     |
+
+
+  Scenario: Backend Use Case 4 - Gemini Backup Key Alternating Rotation
+    Given the backend is configured with "LLM_PROVIDER=GOOGLE"
+    And has both "GEMINI_API_KEY" and "GEMINI_API_KEY_BACKUP" configured in environment variables
+    When the system executes API request queries sequentially
+    Then the "StockInsightAgent" must dynamically swap keys on every second call, routing odd-indexed requests to "GEMINI_API_KEY_BACKUP"
 
   Scenario: Backend Use Case 1 - Financial Ingestion Caching (cache.py)
     Given a request is made to the FastAPI server for ticker details "AAPL"
@@ -98,6 +107,21 @@ Feature: Stock Trend Prediction and Insight System (STPIS) Specification
     When the active provider is configured to "LOCAL"
       Then the client must dispatch a POST request to the local Ollama service "http://localhost:11434/api/generate"
     Then the returned response from either service must be parsed, schema-verified, and returned as a "StockInsightResponse" object
+
+  Scenario: Backend Use Case 5 - Persistent SQLite or Vercel KV Rate Limiting
+    Given the backend has rate limiting enabled ("RATE_LIMIT_ENABLED=true")
+    When a request is processed from IP key "127.0.0.1"
+    And the active provider "LLM_PROVIDER" is set to "GOOGLE"
+    Then the system must check for Vercel KV credentials in the environment
+    And if "KV_REST_API_URL" is present
+      Then it must increment and query the rate limit key in the serverless Redis store
+    Else
+      Then it must query "rate_limits.db" to retrieve the total hit count for this IP in the last 24 hours
+    And if the count exceeds 4 calls
+      Then the system must immediately return the mock fallback payload and skip live LLM generation
+    But if the active provider "LLM_PROVIDER" is set to "LOCAL"
+      Then the rate limiter check must be bypassed entirely
+
 
   # =========================================================================
   # INITIAL LANDING PAGE & ALERTS BANNERS
