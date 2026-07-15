@@ -86,21 +86,22 @@ def check_ip_rate_limit_vercel_kv(ip_address: str, limit: int = 4, period_second
             data = json.loads(res.read().decode())
             count = int(data.get("result", 0))
 
-        # 2. If it's the first hit, set expiration duration (TTL)
-        if count == 1:
+        # 2. Check TTL of key. If TTL is not set (-1 or -2), apply expiration duration
+        ttl_url = f"{kv_url}/ttl/{key}"
+        req_ttl = urllib.request.Request(ttl_url, headers={"Authorization": f"Bearer {kv_token}"})
+        with urllib.request.urlopen(req_ttl) as res_ttl:
+            ttl_data = json.loads(res_ttl.read().decode())
+            ttl = int(ttl_data.get("result", -1))
+
+        if ttl <= 0 or count == 1:
             expire_url = f"{kv_url}/expire/{key}/{period_seconds}"
             req_exp = urllib.request.Request(expire_url, headers={"Authorization": f"Bearer {kv_token}"})
             with urllib.request.urlopen(req_exp) as res_exp:
                 pass
+            ttl = period_seconds
 
         # 3. Check threshold
         if count > limit:
-            # Get TTL remaining to return reset timestamp
-            ttl_url = f"{kv_url}/ttl/{key}"
-            req_ttl = urllib.request.Request(ttl_url, headers={"Authorization": f"Bearer {kv_token}"})
-            with urllib.request.urlopen(req_ttl) as res_ttl:
-                ttl_data = json.loads(res_ttl.read().decode())
-                ttl = int(ttl_data.get("result", 0))
             reset_time = time.time() + (ttl if ttl > 0 else period_seconds)
             return False, reset_time
         return True, None
