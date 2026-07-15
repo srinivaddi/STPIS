@@ -128,7 +128,7 @@ openai>=1.0.0
 Create this file in the `backend/` directory.
 
 ```properties
-# Models Available: GOOGLE, HUGGINGFACE, LOCAL
+# Models Available: GOOGLE, HUGGINGFACE, LOCAL, MOCK
 LLM_PROVIDER=GOOGLE
 
 # Google Gemini API Config

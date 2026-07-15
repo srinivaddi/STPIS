@@ -74,7 +74,7 @@ def check_ip_rate_limit_vercel_kv(ip_address: str, limit: int = 4, period_second
     import urllib.request
     import json
 
-    kv_url = os.environ.get("KV_REST_API_URL")
+    kv_url = os.environ.get("KV_REST_API_URL", "").rstrip("/")
     kv_token = os.environ.get("KV_REST_API_TOKEN")
     key = f"ratelimit:{ip_address}"
 
@@ -235,15 +235,38 @@ def get_stock_insight(ticker: str, request: Request, response: Response):
     provider_env = os.environ.get("LLM_PROVIDER", "GOOGLE").upper().strip()
     rate_limit_enabled_live = os.environ.get("RATE_LIMIT_ENABLED", "true").lower() == "true"
     if rate_limit_enabled_live and provider_env == "GOOGLE":
-        ip_key = request.client.host if request.client else "127.0.0.1"
+        # Get real client IP, respecting proxy headers (essential for Vercel/proxies)
+        ip_key = (
+            request.headers.get("x-vercel-forwarded-for") or
+            request.headers.get("x-forwarded-for") or
+            request.headers.get("x-real-ip") or
+            (request.client.host if request.client else "127.0.0.1")
+        )
+        if "," in ip_key:
+            ip_key = ip_key.split(",")[0].strip()
+
         is_allowed, reset_time = check_ip_rate_limit(ip_key, limit=4, period_seconds=86400)
+
         logger.info(f"Rate limit check for IP: {ip_key}. Enabled: {rate_limit_enabled_live}. Provider: {provider_env}. Allowed: {is_allowed}")
         if not is_allowed:
-            # Convert epoch reset_time to EST (UTC-5)
+            # Convert epoch reset_time to US/Eastern timezone dynamically (handles EST vs EDT)
             import datetime
-            reset_dt = datetime.datetime.utcfromtimestamp(reset_time or time.time())
-            est_dt = reset_dt - datetime.timedelta(hours=5)
-            est_str = est_dt.strftime("%b %d, %Y at %I:%M %p EST")
+            from zoneinfo import ZoneInfo
+            import time
+            
+            ts = reset_time
+            if ts is None:
+                ts = time.time()
+            try:
+                ts = float(ts)
+            except (TypeError, ValueError):
+                ts = time.time()
+
+            utc_dt = datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc)
+            eastern_dt = utc_dt.astimezone(ZoneInfo("America/New_York"))
+            est_str = eastern_dt.strftime("%b %d, %Y at %I:%M %p %Z")
+
+
 
 
             logger.warning(f"Local rate limit exceeded for IP {ip_key}. Reset at {est_str}. Returning mock data.")

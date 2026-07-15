@@ -47,7 +47,16 @@ from app.services.backtester import StrategyBacktester
 
 logger = logging.getLogger(__name__)
 
+def safe_float(val, default: float = 0.0) -> float:
+    if val is None:
+        return default
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
 class StockInsightAgent:
+
     def _get_system_prompt(self) -> str:
         """
         Generates system prompt dynamically, enforcing short or verbose output based on VERBOSITY_LEVEL.
@@ -1025,11 +1034,12 @@ Analyze the following financial data for stock ticker: {stock_data.get('ticker')
             item["rank"] = idx + 1
 
         # Derive risk_metrics and technical_scales from computed indicators
-        ann_vol = float(indicators.get("annual_volatility", 0.25))
-        sharpe = float(indicators.get("sharpe_ratio", 0.8))
-        max_dd = float(indicators.get("max_drawdown", -0.15))
-        avg_ret = float(indicators.get("avg_daily_return", 0.0005))
-        macd_hist = float(indicators.get("macd_histogram", 0.0))
+        ann_vol = safe_float(indicators.get("annual_volatility"), 0.25)
+        sharpe = safe_float(indicators.get("sharpe_ratio"), 0.8)
+        max_dd = safe_float(indicators.get("max_drawdown"), -0.15)
+        avg_ret = safe_float(indicators.get("avg_daily_return"), 0.0005)
+        macd_hist = safe_float(indicators.get("macd_histogram"), 0.0)
+
         trend_score_val = round(max(0.0, min(100.0, rsi)), 1)
         momentum_score_val = round(max(0.0, min(100.0, rsi * 1.1)), 1)
 
@@ -1128,7 +1138,12 @@ Analyze the following financial data for stock ticker: {stock_data.get('ticker')
             except Exception:
                 pass
 
+        target_median_val = safe_float(val_opp.get("analyst_target_median") if val_opp else None, 210.0)
+        roe_val = safe_float(capital_alloc.get("return_on_equity"), 24.5)
+        one_month_ret = safe_float(sec_etf.get("one_month_return"), 2.5)
+
         mock_data = {
+
             "ticker": ticker.upper(),
             "technical_momentum": {
                 "evaluation": rsi_eval,
@@ -1214,34 +1229,34 @@ Analyze the following financial data for stock ticker: {stock_data.get('ticker')
                 "warning_summary": f"Liquidity metrics show a current ratio of {warning_data.get('current_ratio', 1.5):.1f}. {'No major deteriorating signals flagged.' if rsi > 45 else '2 signals require monitoring.'}",
                 "gross_margin": gross_margin,
                 "operating_margin": operating_margin,
-                "current_ratio": float(warning_data.get("current_ratio", 1.5)),
-                "debt_to_equity": float(warning_data.get("debt_to_equity", 0.5)),
+                "current_ratio": safe_float(warning_data.get("current_ratio"), 1.5),
+                "debt_to_equity": safe_float(warning_data.get("debt_to_equity"), 0.5),
             },
             "warning_alerts": [str(a) for a in warning_alerts_list] if warning_alerts_list else [],
             "valuation_opportunity": {
                 "evaluation": "Undervalued" if rsi < 50 else "Fairly Valued",
-                "intrinsic_value": float(val_opp.get("intrinsic_value", 185.0)) if val_opp else 185.0,
-                "analyst_target_median": float(val_opp.get("analyst_target_median", 210.0)) if val_opp else 210.0,
-                "implied_upside_pct": float(val_opp.get("implied_upside_pct", 22.4)) if val_opp else 22.4,
-                "valuation_summary": f"Target price models return a consensus median of ${val_opp.get('analyst_target_median', 210.0) if val_opp else 210.0:.0f}. DCF models suggest the stock is {'undervalued' if rsi < 50 else 'fairly valued'} relative to intrinsic estimates.",
-                "dcf_bear_value": float(dcf_sim.get("bear_case", 150.0)) if isinstance(dcf_sim, dict) else None,
-                "dcf_base_value": float(dcf_sim.get("base_case", 185.0)) if isinstance(dcf_sim, dict) else None,
-                "dcf_bull_value": float(dcf_sim.get("bull_case", 220.0)) if isinstance(dcf_sim, dict) else None,
-                "dcf_upside_probability": float(dcf_sim.get("upside_probability", 0.6)) if isinstance(dcf_sim, dict) else None,
+                "intrinsic_value": safe_float(val_opp.get("intrinsic_value"), 185.0) if val_opp else 185.0,
+                "analyst_target_median": safe_float(val_opp.get("analyst_target_median"), 210.0) if val_opp else 210.0,
+                "implied_upside_pct": safe_float(val_opp.get("implied_upside_pct"), 22.4) if val_opp else 22.4,
+                "valuation_summary": f"Target price models return a consensus median of ${target_median_val:.0f}. DCF models suggest the stock is {'undervalued' if rsi < 50 else 'fairly valued'} relative to intrinsic estimates.",
+                "dcf_bear_value": safe_float(dcf_sim.get("bear_case"), 150.0) if isinstance(dcf_sim, dict) else None,
+                "dcf_base_value": safe_float(dcf_sim.get("base_case"), 185.0) if isinstance(dcf_sim, dict) else None,
+                "dcf_bull_value": safe_float(dcf_sim.get("bull_case"), 220.0) if isinstance(dcf_sim, dict) else None,
+                "dcf_upside_probability": safe_float(dcf_sim.get("upside_probability"), 0.6) if isinstance(dcf_sim, dict) else None,
             },
             "capital_allocation": {
-                "evaluation": "Efficient" if capital_alloc.get("return_on_equity", 0.0) > 15.0 else "Balanced",
-                "dividend_yield": float(capital_alloc.get("dividend_yield", 0.015)),
-                "payout_ratio": float(capital_alloc.get("payout_ratio", 0.28)),
-                "return_on_equity": float(capital_alloc.get("return_on_equity", 24.5)),
-                "return_on_assets": float(capital_alloc.get("return_on_assets", 11.2)),
-                "allocation_summary": f"Management demonstrates capital stewardship with an ROE of {capital_alloc.get('return_on_equity', 24.5):.1f}% and disciplined reinvestment cycles.",
+                "evaluation": "Efficient" if safe_float(capital_alloc.get("return_on_equity"), 0.0) > 15.0 else "Balanced",
+                "dividend_yield": safe_float(capital_alloc.get("dividend_yield"), 0.015),
+                "payout_ratio": safe_float(capital_alloc.get("payout_ratio"), 0.28),
+                "return_on_equity": safe_float(capital_alloc.get("return_on_equity"), 24.5),
+                "return_on_assets": safe_float(capital_alloc.get("return_on_assets"), 11.2),
+                "allocation_summary": f"Management demonstrates capital stewardship with an ROE of {roe_val:.1f}% and disciplined reinvestment cycles.",
             },
             "corporate_moat": {
-                "evaluation": "Wide Moat" if capital_alloc.get("return_on_equity", 0.0) > 20.0 else "Narrow Moat",
-                "moat_score": min(100.0, max(0.0, float(capital_alloc.get("return_on_equity", 20.0)) * 3.5)),
-                "pricing_power": "Strong" if capital_alloc.get("return_on_equity", 0.0) > 15.0 else "Moderate",
-                "moat_summary": f"Computed competitive analysis shows pricing power driven by returns on equity of {capital_alloc.get('return_on_equity', 24.5):.1f}%.",
+                "evaluation": "Wide Moat" if safe_float(capital_alloc.get("return_on_equity"), 0.0) > 20.0 else "Narrow Moat",
+                "moat_score": min(100.0, max(0.0, safe_float(capital_alloc.get("return_on_equity"), 20.0) * 3.5)),
+                "pricing_power": "Strong" if safe_float(capital_alloc.get("return_on_equity"), 0.0) > 15.0 else "Moderate",
+                "moat_summary": f"Computed competitive analysis shows pricing power driven by returns on equity of {roe_val:.1f}%.",
             },
             "investment_committee": {
                 "consensus_recommendation": dynamic_rating,
@@ -1252,7 +1267,7 @@ Analyze the following financial data for stock ticker: {stock_data.get('ticker')
                     {"persona": "Fundamental Analyst", "stance": "Bullish" if val_eval != "Premium" else "Neutral", "confidence_score": 90.0, "argument": f"Profit margins at {margin_str} with stable balance sheet metrics."},
                     {"persona": "Sentiment Analyst", "stance": "Bullish" if rsi > 55 else "Neutral", "confidence_score": 75.0, "argument": "Retail and institutional sentiment shows steady accumulation patterns."},
                     {"persona": "Options Strategist", "stance": "Bullish" if oi_ratio < 0.8 else "Neutral", "confidence_score": 80.0, "argument": f"Put/Call ratio of {oi_ratio:.2f} signals {'bullish' if oi_ratio < 0.8 else 'balanced'} options positioning."},
-                    {"persona": "Macro Economist", "stance": "Bullish" if macro_eval == "Favorable" else "Neutral", "confidence_score": 82.0, "argument": f"Sector ETF showing {sec_etf.get('one_month_return', 2.5):.1f}% 1-month return supports macro tailwind."},
+                    {"persona": "Macro Economist", "stance": "Bullish" if macro_eval == "Favorable" else "Neutral", "confidence_score": 82.0, "argument": f"Sector ETF showing {one_month_ret:.1f}% 1-month return supports macro tailwind."},
                 ],
             },
             "bull_bear_debate": {
@@ -2598,12 +2613,21 @@ Analyze the following financial data for stock ticker: {stock_data.get('ticker')
         use_batch_live = os.environ.get("BATCH", "false").lower() == "true"
         provider_env = os.environ.get("LLM_PROVIDER", "GOOGLE").upper().strip()
         
-        if provider_env == "LOCAL":
+        if provider_env == "MOCK":
+            ticker_symbol = stock_data.ticker.upper()
+            prices_list = [p.model_dump() for p in stock_data.prices]
+            indicators = self.calculate_indicators(prices_list)
+            mock_data = self._get_mock_insight(ticker_symbol, stock_data, indicators)
+            mock_data["is_mock"] = True
+            mock_data["fallback_reason"] = "Forced Developer Sandbox Demo Mode"
+            return StockInsightResponse(**mock_data)
+        elif provider_env == "LOCAL":
             return self._generate_insight_local_llm(stock_data)
         elif provider_env != "GOOGLE":
             return self._generate_insight_huggingface_hub(stock_data)
         elif use_batch_live:
             return self._generate_insight_gemini_batch(stock_data)
+
 
         ticker_symbol = stock_data.ticker.upper()
         
