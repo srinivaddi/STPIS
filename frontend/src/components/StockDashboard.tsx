@@ -584,6 +584,13 @@ type TabKey = "overview" | "technical" | "fundamentals" | "risk" | "sentiment" |
 // ────────────────────────────────────────────────────────────
 // Main component
 // ────────────────────────────────────────────────────────────
+const getApiUrl = (path: string): string => {
+  if (typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")) {
+    return `http://127.0.0.1:8000${path}`;
+  }
+  return path;
+};
+
 export default function StockDashboard() {
   const [mounted, setMounted] = useState(false);
   const [searchTicker, setSearchTicker] = useState("");
@@ -642,7 +649,7 @@ export default function StockDashboard() {
       if (growth !== undefined) payload.growth_rate = growth;
       if (perp !== undefined) payload.perpetuity_growth = perp;
 
-      const res = await fetch(`http://127.0.0.1:8000/api/stock/${ticker}/dcf_simulation`, {
+      const res = await fetch(getApiUrl(`/api/stock/${ticker}/dcf_simulation`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -677,7 +684,7 @@ export default function StockDashboard() {
 
     // Step 1: Fetch basic financials & price history
     try {
-      const dataRes = await fetch(`http://127.0.0.1:8000/api/stock/${cleanTicker}`);
+      const dataRes = await fetch(getApiUrl(`/api/stock/${cleanTicker}`));
       if (!dataRes.ok) {
         if (dataRes.status === 404) throw new Error(`Ticker '${cleanTicker}' not found.`);
         throw new Error("Failed to fetch stock financials.");
@@ -697,7 +704,7 @@ export default function StockDashboard() {
     // Step 2: Fetch AI generated insights & metrics
     try {
       const insightStart = performance.now();
-      const insightRes = await fetch(`http://127.0.0.1:8000/api/stock/${cleanTicker}/insight`);
+      const insightRes = await fetch(getApiUrl(`/api/stock/${cleanTicker}/insight`));
       if (!insightRes.ok) throw new Error("Failed to fetch AI insights.");
       const insightJson: StockInsightResponse = await insightRes.json();
       const insightEnd = performance.now();
